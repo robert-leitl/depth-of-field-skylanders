@@ -16,8 +16,8 @@ float map(float value, float min1, float max1, float min2, float max2) {
 void main() {
     float depth = texture(u_depthTexture, v_uv).r;
     float CoC = depth * 2. - 1.;
-    float minCoC = -0.0;
-    float maxCoC = 0.6;
+    float minCoC = .9;
+    float maxCoC = 1.0;
     float alpha = map(clamp(CoC, minCoC, maxCoC), minCoC, maxCoC, 1., 0.);
     vec4 color = texture(u_colorTexture, v_uv);
     outColor = vec4(color.rgb * alpha, alpha);

@@ -24,10 +24,23 @@ vec4 blur13(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {
   return color;
 }
 
+vec4 boxBlur(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {
+  vec4 color = vec4(0.);
+  vec2 texelSize = 1. / resolution;
+  int size = int(max(direction.x, direction.y));
+  vec2 dir = normalize(direction);
+  for(int i=-size; i<=size; ++i) {
+    vec4 tex = texture(image, uv + texelSize * dir * float(i));
+    color += tex;
+  }
+  color /= (float(size) * 2. + 1.);
+  return color;
+}
+
 void main() {
     vec4 color = texture(u_colorTexture, v_uv);
     outColor = color;
 
     vec2 res = vec2(textureSize(u_colorTexture, 0));
-    outColor = blur13(u_colorTexture, v_uv, res, u_direction);
+    outColor = boxBlur(u_colorTexture, v_uv, res, u_direction);
 }
