@@ -11,5 +11,5 @@ out vec4 outColor;
 
 void main() {
     vec3 n = normalize(v_normal);
-    outColor = vec4(v_normal, 1.) + vec4(v_uv, 0.5, 0.5);
+    outColor = vec4(vec3(max(0., dot(n, vec3(0.6, 0.5, 0.5))) + 0.4) * vec3(1., 0.2, 0.6), 1.);
 }
