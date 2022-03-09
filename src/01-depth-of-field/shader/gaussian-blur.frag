@@ -29,11 +29,16 @@ vec4 boxBlur(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {
   vec2 texelSize = 1. / resolution;
   int size = int(max(direction.x, direction.y));
   vec2 dir = normalize(direction);
+  float blurAmount = 0.;
+
   for(int i=-size; i<=size; ++i) {
     vec4 tex = texture(image, uv + texelSize * dir * float(i));
+    tex *= tex.a;
+    blurAmount += tex.a;
     color += tex;
   }
-  color /= (float(size) * 2. + 1.);
+  //color /= (float(size) * 2. + 1.);
+  color /= blurAmount;
   return color;
 }
 
@@ -42,5 +47,6 @@ void main() {
     outColor = color;
 
     vec2 res = vec2(textureSize(u_colorTexture, 0));
-    outColor = boxBlur(u_colorTexture, v_uv, res, u_direction);
+    float CoC = texture(u_colorTexture, v_uv).a;
+    outColor = boxBlur(u_colorTexture, v_uv, res, u_direction) * CoC;
 }
