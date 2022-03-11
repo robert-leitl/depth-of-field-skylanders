@@ -1,7 +1,5 @@
 
 import * as twgl from 'twgl.js';
-import drawFragmentShaderSource from './shader/draw.frag';
-import drawVertexShaderSource from './shader/draw.vert';
 import depthFragmentShaderSource from './shader/depth.frag';
 import depthVertexShaderSource from './shader/depth.vert';
 import nearFieldFragmentShaderSource from './shader/near-field.frag';
@@ -12,6 +10,13 @@ import gaussianBlurFragmentShaderSource from './shader/gaussian-blur.frag';
 import gaussianBlurVertexShaderSource from './shader/gaussian-blur.vert';
 import compositeFragmentShaderSource from './shader/composite.frag';
 import compositeVertexShaderSource from './shader/composite.vert';
+
+
+import drawVertShaderSource from './shader/draw.vert';
+import drawFragShaderSource from './shader/draw.frag';
+import dofPackVertShaderSource from './shader/dof-pack.vert';
+import dofPackFragShaderSource from './shader/dof-pack.frag';
+
 /*
 Credits:
 - https://casual-effects.blogspot.com/2013/09/the-skylanders-swap-force-depth-of.html
@@ -25,6 +30,8 @@ export class DepthOfField {
     #deltaTime = 0;
     #isDestroyed = false;
     intermediatePreviewSize = 1 / 6;
+
+    DOF_TEXTURE_SCALE = .5;
 
     camera = {
         rotation: 0,
@@ -249,7 +256,9 @@ export class DepthOfField {
         ///////////////////////////////////  PROGRAM SETUP
 
         // setup programs
-        this.drawProgram = this.#createProgram(gl, [drawVertexShaderSource, drawFragmentShaderSource]);
+        this.drawProgram = this.#createProgram(gl, [drawVertShaderSource, drawFragShaderSource]);
+        this.dofPackProgram = this.#createProgram(gl, [dofPackVertShaderSource, dofPackFragShaderSource], null, {a_position: 0, a_uv: 1});
+
         this.depthProgram = this.#createProgram(gl, [depthVertexShaderSource, depthFragmentShaderSource], null, {a_position: 0, a_uv: 1});
         this.nearFieldProgram = this.#createProgram(gl, [nearFieldVertexShaderSource, nearFieldFragmentShaderSource], null, {a_position: 0, a_uv: 1});
         this.colorProgram = this.#createProgram(gl, [colorVertexShaderSource, colorFragmentShaderSource], null, {a_position: 0, a_uv: 1});
@@ -268,6 +277,12 @@ export class DepthOfField {
             u_worldInverseTransposeMatrix: gl.getUniformLocation(this.drawProgram, 'u_worldInverseTransposeMatrix')
             //u_deltaTime: gl.getUniformLocation(this.drawProgram, 'u_deltaTime')
         };
+        this.dofPackLocations = {
+            a_position: gl.getAttribLocation(this.depthProgram, 'a_position'),
+            a_uv: gl.getAttribLocation(this.depthProgram, 'a_uv'),
+            u_depth: gl.getUniformLocation(this.depthProgram, 'u_depth'),
+            u_color: gl.getUniformLocation(this.depthProgram, 'u_color')
+        }
         this.depthLocations = {
             a_position: gl.getAttribLocation(this.depthProgram, 'a_position'),
             a_uv: gl.getAttribLocation(this.depthProgram, 'a_uv'),
@@ -298,6 +313,14 @@ export class DepthOfField {
             u_colorTexture: gl.getUniformLocation(this.compositeProgram, 'u_colorTexture'),
             u_nearFieldTexture: gl.getUniformLocation(this.compositeProgram, 'u_nearFieldTexture'),
             u_farFieldTexture: gl.getUniformLocation(this.compositeProgram, 'u_farFieldTexture')
+        };
+
+        // setup uniforms
+        this.drawUniforms = {
+            u_worldMatrix: twgl.m4.translate(twgl.m4.scaling([13, 13, 13]), [0, 0, 0]),
+            u_viewMatrix: twgl.m4.identity(),
+            u_projectionMatrix: twgl.m4.identity(),
+            u_worldInverseTransposeMatrix: twgl.m4.identity()
         };
 
         /////////////////////////////////// GEOMETRY / MESH SETUP
@@ -403,6 +426,16 @@ export class DepthOfField {
             console.error('could not complete render framebuffer setup')
         }
 
+        /////////////////////////////////// DOF PACK COLOR AND COC PASS SETUP
+
+        this.dofFramebufferWidth = clientWidth * this.DOF_TEXTURE_SCALE;
+        this.dofFramebufferHeight = clientHeight * this.DOF_TEXTURE_SCALE;
+
+        this.dofPackedTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofPackedTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.clientWidth, gl.canvas.clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        this.dofPackedFramebuffer = this.#createFrameBuffer(this.dofPackedTexture);
+
 
        /* this.framebufferTextureA = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
         gl.bindTexture(gl.TEXTURE_2D, this.framebufferTextureA);
@@ -418,14 +451,6 @@ export class DepthOfField {
         gl.bindTexture(gl.TEXTURE_2D, this.framebufferTextureC);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.clientWidth, gl.canvas.clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
         this.framebufferC = this.#createFrameBuffer(this.framebufferTextureC);*/
-
-        // init the global uniforms
-        this.drawUniforms = {
-            u_worldMatrix: twgl.m4.translate(twgl.m4.scaling([13, 13, 13]), [0, 0, 0]),
-            u_viewMatrix: twgl.m4.identity(),
-            u_projectionMatrix: twgl.m4.identity(),
-            u_worldInverseTransposeMatrix: twgl.m4.identity()
-        };
 
         this.blurUniforms = {
             u_blurSize: 5
@@ -539,8 +564,10 @@ export class DepthOfField {
         const clientHeight = gl.canvas.clientHeight;
         this.drawFramebufferWidth = clientWidth;
         this.drawFramebufferHeight = clientHeight;
+        this.dofFramebufferWidth = clientWidth * this.DOF_TEXTURE_SCALE;
+        this.dofFramebufferHeight = clientHeight * this.DOF_TEXTURE_SCALE;
 
-
+        // resize draw/blit textures and buffers
         gl.bindRenderbuffer(gl.RENDERBUFFER, this.depthRenderbuffer);
         gl.renderbufferStorageMultisample(gl.RENDERBUFFER, 4, gl.DEPTH_COMPONENT32F, clientWidth, clientHeight);
         gl.bindRenderbuffer(gl.RENDERBUFFER, this.colorRenderbuffer);
@@ -549,8 +576,12 @@ export class DepthOfField {
         gl.texImage2D(this. gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, clientWidth, clientHeight, 0, gl.DEPTH_COMPONENT, gl.FLOAT, null);
         gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, clientWidth, clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        
 
+        // resize dof packed texture
+        gl.bindTexture(gl.TEXTURE_2D, this.dofPackedTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.clientWidth, gl.canvas.clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        
+        // reset bindings
         gl.bindRenderbuffer(gl.RENDERBUFFER, null);
         gl.bindTexture(gl.TEXTURE_2D, null);
         
