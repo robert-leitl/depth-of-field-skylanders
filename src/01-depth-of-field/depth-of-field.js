@@ -120,6 +120,20 @@ export class DepthOfField {
         gl.blitFramebuffer(0, 0, this.drawFramebufferWidth, this.drawFramebufferHeight, 0, 0, this.drawFramebufferWidth, this.drawFramebufferHeight, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
         this.#setFramebuffer(gl, null, gl.drawingBufferWidth, gl.drawingBufferHeight);
 
+        // pack color and CoC pass
+        this.#setFramebuffer(gl, this.dofPackedFramebuffer, this.dofFramebufferWidth, this.dofFramebufferHeight);
+        gl.useProgram(this.dofPackProgram);
+        gl.clearColor(0, 0, 0, 1);
+        gl.bindVertexArray(this.quadVAO);
+        gl.uniform1i(this.dofPackLocations.u_depth, 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.depthTexture);
+        gl.uniform1i(this.dofPackLocations.u_color, 1);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
+        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
+        this.#setFramebuffer(gl, null, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
         // separate the near field 
         /*this.#setFramebuffer(gl, this.framebufferA, this.fboWidth, this.fboHeight);
         gl.clearColor(0, 0, 0, 1);
@@ -161,6 +175,7 @@ export class DepthOfField {
         // draw the pass overlays
         let intermediatePreviewY = this.#renderIntermediatePreview(0, this.colorTexture);
         intermediatePreviewY = this.#renderIntermediatePreview(intermediatePreviewY, this.depthTexture);
+        intermediatePreviewY = this.#renderIntermediatePreview(intermediatePreviewY, this.dofPackedTexture);
 
         // draw the near field
         /*y += h;
@@ -278,10 +293,10 @@ export class DepthOfField {
             //u_deltaTime: gl.getUniformLocation(this.drawProgram, 'u_deltaTime')
         };
         this.dofPackLocations = {
-            a_position: gl.getAttribLocation(this.depthProgram, 'a_position'),
-            a_uv: gl.getAttribLocation(this.depthProgram, 'a_uv'),
-            u_depth: gl.getUniformLocation(this.depthProgram, 'u_depth'),
-            u_color: gl.getUniformLocation(this.depthProgram, 'u_color')
+            a_position: gl.getAttribLocation(this.dofPackProgram, 'a_position'),
+            a_uv: gl.getAttribLocation(this.dofPackProgram, 'a_uv'),
+            u_depth: gl.getUniformLocation(this.dofPackProgram, 'u_depth'),
+            u_color: gl.getUniformLocation(this.dofPackProgram, 'u_color')
         }
         this.depthLocations = {
             a_position: gl.getAttribLocation(this.depthProgram, 'a_position'),
@@ -433,8 +448,8 @@ export class DepthOfField {
 
         this.dofPackedTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
         gl.bindTexture(gl.TEXTURE_2D, this.dofPackedTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.clientWidth, gl.canvas.clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        this.dofPackedFramebuffer = this.#createFrameBuffer(this.dofPackedTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        this.dofPackedFramebuffer = this.#createFrameBuffer(gl, this.dofPackedTexture);
 
 
        /* this.framebufferTextureA = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
@@ -579,7 +594,7 @@ export class DepthOfField {
 
         // resize dof packed texture
         gl.bindTexture(gl.TEXTURE_2D, this.dofPackedTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.clientWidth, gl.canvas.clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
         
         // reset bindings
         gl.bindRenderbuffer(gl.RENDERBUFFER, null);

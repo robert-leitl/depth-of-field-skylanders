@@ -10,5 +10,7 @@ in vec2 v_uv;
 out vec4 packed;
 
 void main() {
-    packed = vec4(v_uv, 1., 1.);
+    float CoC = texture(u_depth, v_uv).r;
+    vec4 color = texture(u_color, v_uv);
+    packed = vec4(color.rgb, CoC);
 }
