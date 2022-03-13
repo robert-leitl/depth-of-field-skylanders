@@ -1,21 +1,16 @@
 
 import * as twgl from 'twgl.js';
-import depthFragmentShaderSource from './shader/depth.frag';
-import depthVertexShaderSource from './shader/depth.vert';
-import nearFieldFragmentShaderSource from './shader/near-field.frag';
-import nearFieldVertexShaderSource from './shader/near-field.vert';
-import colorFragmentShaderSource from './shader/color.frag';
-import colorVertexShaderSource from './shader/color.vert';
-import gaussianBlurFragmentShaderSource from './shader/gaussian-blur.frag';
-import gaussianBlurVertexShaderSource from './shader/gaussian-blur.vert';
-import compositeFragmentShaderSource from './shader/composite.frag';
-import compositeVertexShaderSource from './shader/composite.vert';
-
 
 import drawVertShaderSource from './shader/draw.vert';
 import drawFragShaderSource from './shader/draw.frag';
 import dofPackVertShaderSource from './shader/dof-pack.vert';
 import dofPackFragShaderSource from './shader/dof-pack.frag';
+import dofBlurHVertShaderSource from './shader/dof-blur-h.vert';
+import dofBlurHFragShaderSource from './shader/dof-blur-h.frag';
+import dofBlurVVertShaderSource from './shader/dof-blur-v.vert';
+import dofBlurVFragShaderSource from './shader/dof-blur-v.frag';
+import dofCompositeVertShaderSource from './shader/dof-composite.vert';
+import dofCompositeFragShaderSource from './shader/dof-composite.frag';
 
 /*
 Credits:
@@ -29,14 +24,26 @@ export class DepthOfField {
     #time = 0;
     #deltaTime = 0;
     #isDestroyed = false;
-    intermediatePreviewSize = 1 / 6;
+    passPreviewSize = 1 / 6;
 
     DOF_TEXTURE_SCALE = .5;
+
+    PASS_COC = 1
+    PASS_RESULT = 0
 
     camera = {
         rotation: 0,
         position: [0, 0, 150],
-        matrix: twgl.m4.identity()
+        matrix: twgl.m4.identity(),
+        near: 1,
+        far: 500
+    };
+
+    dof = {
+        nearBlurry: 0,
+        nearSharp: 10,
+        farSharp: 300,
+        farBlurry: 500
     };
 
     constructor(canvas, pane, oninit = null) {
@@ -70,7 +77,7 @@ export class DepthOfField {
         this.drawUniforms.u_worldInverseTransposeMatrix = twgl.m4.transpose(twgl.m4.inverse(this.drawUniforms.u_worldMatrix));
 
         this.instanceMatrices.forEach((mat, ndx) => {
-            twgl.m4.rotateY(mat, this.#deltaTime * 0.000005 * (ndx + 1), mat);
+            twgl.m4.rotateY(mat, this.#deltaTime * 0.000001 * (ndx + 1), mat);
         });
 
         this.#render();
@@ -121,138 +128,116 @@ export class DepthOfField {
         this.#setFramebuffer(gl, null, gl.drawingBufferWidth, gl.drawingBufferHeight);
 
         // pack color and CoC pass
-        this.#setFramebuffer(gl, this.dofPackedFramebuffer, this.dofFramebufferWidth, this.dofFramebufferHeight);
-        gl.useProgram(this.dofPackProgram);
-        gl.clearColor(0, 0, 0, 1);
-        gl.bindVertexArray(this.quadVAO);
-        gl.uniform1i(this.dofPackLocations.u_depth, 0);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.depthTexture);
-        gl.uniform1i(this.dofPackLocations.u_color, 1);
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
-        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
-        this.#setFramebuffer(gl, null, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        this.#renderDofPass(
+            this.dofPackedFramebuffer, 
+            this.drawFramebufferWidth, this.drawFramebufferHeight, 
+            this.dofPackProgram,
+            [
+                [this.dofPackLocations.u_depth, this.depthTexture],
+                [this.dofPackLocations.u_color, this.colorTexture]
+            ],
+            [
+                [this.dofPackLocations.u_nearBlurry, this.dof.nearBlurry],
+                [this.dofPackLocations.u_nearSharp, this.dof.nearSharp],
+                [this.dofPackLocations.u_farBlurry, this.dof.farBlurry],
+                [this.dofPackLocations.u_farSharp, this.dof.farSharp]
+            ]
+        );
 
-        // separate the near field 
-        /*this.#setFramebuffer(gl, this.framebufferA, this.fboWidth, this.fboHeight);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.useProgram(this.nearFieldProgram);
-        gl.bindVertexArray(this.quadVAO);
-        gl.uniform1i(this.nearFieldLocations.u_depthTexture, 0);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.depthTexture);
-        gl.uniform1i(this.nearFieldLocations.u_colorTexture, 1);
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
-        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
-        this.#setFramebuffer(gl, null, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        // blur horizontal pass
+        this.#renderDofPass(
+            this.dofBlurHFramebuffer, 
+            this.dofFramebufferWidth, this.dofFramebufferHeight, 
+            this.dofBlurHProgram,
+            [
+                [this.dofBlurHLocations.u_packedTexture, this.dofPackedTexture]
+            ]
+        );
 
-        // blur the nearfield image
-        const blurredNearFieldTexture = this.#blur(this.framebufferTextureA, this.framebufferA, this.framebufferTextureA);
-        const blurredFarFieldTexture = this.#blur(this.colorTexture, this.framebufferC, this.framebufferTextureC);
+        // blur vertical pass
+        this.#renderDofPass(
+            this.dofBlurVFramebuffer, 
+            this.dofFramebufferWidth, this.dofFramebufferHeight, 
+            this.dofBlurVProgram,
+            [
+                [this.dofBlurVLocations.u_midFarBlurTexture, this.dofBlurHMidFarTexture],
+                [this.dofBlurVLocations.u_nearBlurTexture, this.dofBlurHNearTexture]
+            ]
+        );
 
-        // draw composite image
-        gl.useProgram(this.compositeProgram);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.bindVertexArray(this.quadVAO);
-        gl.uniform1i(this.compositeLocations.u_depthTexture, 0);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.depthTexture);
-        gl.uniform1i(this.compositeLocations.u_colorTexture, 1);
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
-        gl.uniform1i(this.compositeLocations.u_nearFieldTexture, 2);
-        gl.activeTexture(gl.TEXTURE2);
-        gl.bindTexture(gl.TEXTURE_2D, blurredNearFieldTexture);
-        gl.uniform1i(this.compositeLocations.u_farFieldTexture, 3);
-        gl.activeTexture(gl.TEXTURE3);
-        gl.bindTexture(gl.TEXTURE_2D, blurredFarFieldTexture);
-        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);*/
+        // render the composite to the draw framebuffer
+        this.#renderComposite(this.PASS_RESULT);
 
         // draw the pass overlays
-        let intermediatePreviewY = this.#renderIntermediatePreview(0, this.colorTexture);
-        intermediatePreviewY = this.#renderIntermediatePreview(intermediatePreviewY, this.depthTexture);
-        intermediatePreviewY = this.#renderIntermediatePreview(intermediatePreviewY, this.dofPackedTexture);
-
-        // draw the near field
-        /*y += h;
-        gl.scissor(0, y, w, h);
-        gl.viewport(0, y, w, h);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.useProgram(this.colorProgram);
-        gl.bindVertexArray(this.quadVAO);
-        gl.uniform1i(this.colorLocations.u_colorTexture, 0);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, blurredNearFieldTexture);
-        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
-
-        // draw the blurred near field
-        y += h;
-        gl.scissor(0, y, w, h);
-        gl.viewport(0, y, w, h);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.useProgram(this.colorProgram);
-        gl.bindVertexArray(this.quadVAO);
-        gl.uniform1i(this.colorLocations.u_colorTexture, 0);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, blurredFarFieldTexture);
-        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
-
-        gl.disable(gl.SCISSOR_TEST);*/
+        let previewY = this.#renderPassPreview(0, this.PASS_RESULT);
+        previewY = this.#renderPassPreview(previewY, this.PASS_RESULT);
+        previewY = this.#renderPassPreview(previewY, this.PASS_RESULT);
     }
 
-    #renderIntermediatePreview(y = 0, texture) {
-        const gl  = this.gl;
+    #renderDofPass(fbo, w, h, program, locTex, locFloat = []) {
+         /** @type {WebGLRenderingContext} */
+         const gl = this.gl;
 
-        const w = gl.canvas.width * this.intermediatePreviewSize;
-        const h = gl.canvas.height * this.intermediatePreviewSize;
+        this.#setFramebuffer(gl, fbo, w, h);
+        gl.useProgram(program);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.bindVertexArray(this.quadVAO);
+
+        locTex.forEach(([loc, texture], ndx) => {
+            gl.uniform1i(loc, ndx);
+            gl.activeTexture(gl[`TEXTURE${ndx}`]);
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+        });
+
+        locFloat.forEach(([loc, value], ndx) => {
+            gl.uniform1f(loc, value);
+        });
+
+        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
+        this.#setFramebuffer(gl, null, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    }
+
+    #renderPassPreview(y = 0, passIndex = 0) {
+        /** @type {WebGLRenderingContext} */
+        const gl = this.gl;
+
+        const w = gl.canvas.width * this.passPreviewSize;
+        const h = gl.canvas.height * this.passPreviewSize;
 
         gl.enable(gl.SCISSOR_TEST);
         gl.scissor(0, y, w, h);
         gl.viewport(0, y, w, h);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.useProgram(this.colorProgram);
-        gl.bindVertexArray(this.quadVAO);
-        gl.uniform1i(this.colorLocations.u_colorTexture, 0);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
+        this.#renderComposite(passIndex);
         gl.disable(gl.SCISSOR_TEST);
 
         return y + h;
     }
 
-    #blur(texture, outFBO, outTex) {
-        this.#setFramebuffer(gl, this.framebufferB, this.fboWidth, this.fboHeight);
+    #renderComposite(passIndex = 0) {
+        /** @type {WebGLRenderingContext} */
+        const gl = this.gl;
+
         gl.clearColor(0, 0, 0, 1);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.useProgram(this.gaussianBlurProgram);
-        gl.uniform2f(this.gaussianBlurLocations.u_direction, this.blurUniforms.u_blurSize, 0);
+        gl.useProgram(this.dofCompositeProgram);
         gl.bindVertexArray(this.quadVAO);
-        gl.uniform1i(this.gaussianBlurLocations.u_colorTexture, 0);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
 
-        this.#setFramebuffer(gl, outFBO, this.fboWidth, this.fboHeight);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.useProgram(this.gaussianBlurProgram);
-        gl.uniform2f(this.gaussianBlurLocations.u_direction, 0, this.blurUniforms.u_blurSize);
-        gl.bindVertexArray(this.quadVAO);
-        gl.uniform1i(this.gaussianBlurLocations.u_colorTexture, 0);
+        gl.uniform1i(this.dofCompositeLocations.u_packedTexture, 0);
         gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.framebufferTextureB);
-        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
-        this.#setFramebuffer(gl, null, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofPackedTexture);
 
-        return outTex;
+        gl.uniform1i(this.dofCompositeLocations.u_midFarBlurTexture, 1);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurVMidFarTexture);
+
+        gl.uniform1i(this.dofCompositeLocations.u_nearBlurTexture, 2);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurVNearTexture);
+
+        gl.uniform1i(this.dofCompositeLocations.u_passIndex, passIndex);
+        
+        gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
     }
 
     destroy() {
@@ -273,12 +258,9 @@ export class DepthOfField {
         // setup programs
         this.drawProgram = this.#createProgram(gl, [drawVertShaderSource, drawFragShaderSource]);
         this.dofPackProgram = this.#createProgram(gl, [dofPackVertShaderSource, dofPackFragShaderSource], null, {a_position: 0, a_uv: 1});
-
-        this.depthProgram = this.#createProgram(gl, [depthVertexShaderSource, depthFragmentShaderSource], null, {a_position: 0, a_uv: 1});
-        this.nearFieldProgram = this.#createProgram(gl, [nearFieldVertexShaderSource, nearFieldFragmentShaderSource], null, {a_position: 0, a_uv: 1});
-        this.colorProgram = this.#createProgram(gl, [colorVertexShaderSource, colorFragmentShaderSource], null, {a_position: 0, a_uv: 1});
-        this.gaussianBlurProgram = this.#createProgram(gl, [gaussianBlurVertexShaderSource, gaussianBlurFragmentShaderSource], null, {a_position: 0, a_uv: 1});
-        this.compositeProgram = this.#createProgram(gl, [compositeVertexShaderSource, compositeFragmentShaderSource], null, {a_position: 0, a_uv: 1});
+        this.dofBlurHProgram = this.#createProgram(gl, [dofBlurHVertShaderSource, dofBlurHFragShaderSource], null, {a_position: 0, a_uv: 1});
+        this.dofBlurVProgram = this.#createProgram(gl, [dofBlurVVertShaderSource, dofBlurVFragShaderSource], null, {a_position: 0, a_uv: 1});
+        this.dofCompositeProgram = this.#createProgram(gl, [dofCompositeVertShaderSource, dofCompositeFragShaderSource], null, {a_position: 0, a_uv: 1});
 
         // find the locations
         this.drawLocations = {
@@ -296,38 +278,30 @@ export class DepthOfField {
             a_position: gl.getAttribLocation(this.dofPackProgram, 'a_position'),
             a_uv: gl.getAttribLocation(this.dofPackProgram, 'a_uv'),
             u_depth: gl.getUniformLocation(this.dofPackProgram, 'u_depth'),
-            u_color: gl.getUniformLocation(this.dofPackProgram, 'u_color')
-        }
-        this.depthLocations = {
-            a_position: gl.getAttribLocation(this.depthProgram, 'a_position'),
-            a_uv: gl.getAttribLocation(this.depthProgram, 'a_uv'),
-            u_depthTexture: gl.getUniformLocation(this.depthProgram, 'u_depthTexture'),
-            u_colorTexture: gl.getUniformLocation(this.depthProgram, 'u_colorTexture')
+            u_color: gl.getUniformLocation(this.dofPackProgram, 'u_color'),
+            u_nearBlurry: gl.getUniformLocation(this.dofPackProgram, 'u_nearBlurry'),
+            u_nearSharp: gl.getUniformLocation(this.dofPackProgram, 'u_nearSharp'),
+            u_farBlurry: gl.getUniformLocation(this.dofPackProgram, 'u_farBlurry'),
+            u_farSharp: gl.getUniformLocation(this.dofPackProgram, 'u_farSharp')
         };
-        this.nearFieldLocations = {
-            a_position: gl.getAttribLocation(this.nearFieldProgram, 'a_position'),
-            a_uv: gl.getAttribLocation(this.nearFieldProgram, 'a_uv'),
-            u_depthTexture: gl.getUniformLocation(this.nearFieldProgram, 'u_depthTexture'),
-            u_colorTexture: gl.getUniformLocation(this.nearFieldProgram, 'u_colorTexture')
+        this.dofBlurHLocations = {
+            a_position: gl.getAttribLocation(this.dofBlurHProgram, 'a_position'),
+            a_uv: gl.getAttribLocation(this.dofBlurHProgram, 'a_uv'),
+            u_packedTexture: gl.getUniformLocation(this.dofBlurHProgram, 'u_packedTexture'),
         };
-        this.colorLocations = {
-            a_position: gl.getAttribLocation(this.colorProgram, 'a_position'),
-            a_uv: gl.getAttribLocation(this.colorProgram, 'a_uv'),
-            u_colorTexture: gl.getUniformLocation(this.colorProgram, 'u_colorTexture')
+        this.dofBlurVLocations = {
+            a_position: gl.getAttribLocation(this.dofBlurVProgram, 'a_position'),
+            a_uv: gl.getAttribLocation(this.dofBlurVProgram, 'a_uv'),
+            u_midFarBlurTexture: gl.getUniformLocation(this.dofBlurVProgram, 'u_midFarBlurTexture'),
+            u_nearBlurTexture: gl.getUniformLocation(this.dofBlurVProgram, 'u_nearBlurTexture'),
         };
-        this.gaussianBlurLocations = {
-            a_position: gl.getAttribLocation(this.gaussianBlurProgram, 'a_position'),
-            a_uv: gl.getAttribLocation(this.gaussianBlurProgram, 'a_uv'),
-            u_colorTexture: gl.getUniformLocation(this.gaussianBlurProgram, 'u_colorTexture'),
-            u_direction: gl.getUniformLocation(this.gaussianBlurProgram, 'u_direction')
-        };
-        this.compositeLocations = {
-            a_position: gl.getAttribLocation(this.compositeProgram, 'a_position'),
-            a_uv: gl.getAttribLocation(this.compositeProgram, 'a_uv'),
-            u_depthTexture: gl.getUniformLocation(this.compositeProgram, 'u_depthTexture'),
-            u_colorTexture: gl.getUniformLocation(this.compositeProgram, 'u_colorTexture'),
-            u_nearFieldTexture: gl.getUniformLocation(this.compositeProgram, 'u_nearFieldTexture'),
-            u_farFieldTexture: gl.getUniformLocation(this.compositeProgram, 'u_farFieldTexture')
+        this.dofCompositeLocations = {
+            a_position: gl.getAttribLocation(this.dofCompositeProgram, 'a_position'),
+            a_uv: gl.getAttribLocation(this.dofCompositeProgram, 'a_uv'),
+            u_packedTexture: gl.getUniformLocation(this.dofCompositeProgram, 'u_packedTexture'),
+            u_midFarBlurTexture: gl.getUniformLocation(this.dofCompositeProgram, 'u_midFarBlurTexture'),
+            u_nearBlurTexture: gl.getUniformLocation(this.dofCompositeProgram, 'u_nearBlurTexture'),
+            u_passIndex: gl.getUniformLocation(this.dofCompositeProgram, 'u_passIndex')
         };
 
         // setup uniforms
@@ -351,8 +325,8 @@ export class DepthOfField {
         // create quad VAO
         this.quadBuffers = twgl.primitives.createXYQuadBuffers(gl);
         this.quadVAO = this.#makeVertexArray(gl, [
-            [this.quadBuffers.position, this.depthLocations.a_position, 2],
-            [this.quadBuffers.texcoord, this.depthLocations.a_uv, 2]
+            [this.quadBuffers.position, this.dofPackLocations.a_position, 2],
+            [this.quadBuffers.texcoord, this.dofPackLocations.a_uv, 2]
         ], this.quadBuffers.indices);
 
 
@@ -369,7 +343,7 @@ export class DepthOfField {
             const x = i % this.gridSize - offset;
             const z = Math.floor(i / layerCount) - offset;
             const y = Math.floor((i % layerCount) / this.gridSize) - offset;
-            const instanceMatrix = twgl.m4.scale(twgl.m4.translation([x * spacing, y * spacing, z * spacing]), [Math.random() + .5, Math.random() + 0.75, Math.random() + .5]);
+            const instanceMatrix = twgl.m4.translation([x * spacing, y * spacing, z * spacing]);
             const instanceMatrixArray = new Float32Array(this.instanceMatricesArray.buffer, i * 16 * 4, 16);
             instanceMatrixArray.set(instanceMatrix);
             this.instanceMatrices.push(instanceMatrixArray);
@@ -413,12 +387,12 @@ export class DepthOfField {
         // depth render buffer setup
         this.depthRenderbuffer = gl.createRenderbuffer();
         gl.bindRenderbuffer(gl.RENDERBUFFER, this.depthRenderbuffer);
-        gl.renderbufferStorageMultisample(gl.RENDERBUFFER, 4, gl.DEPTH_COMPONENT32F, clientWidth, clientHeight);
+        gl.renderbufferStorageMultisample(gl.RENDERBUFFER, 4, gl.DEPTH_COMPONENT32F, this.drawFramebufferWidth, this.drawFramebufferHeight);
         gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.depthRenderbuffer);
         // color renderbuffer setup
         this.colorRenderbuffer = gl.createRenderbuffer();
         gl.bindRenderbuffer(gl.RENDERBUFFER, this.colorRenderbuffer);
-        gl.renderbufferStorageMultisample(gl.RENDERBUFFER, gl.getParameter(gl.MAX_SAMPLES), gl.RGBA8, clientWidth, clientHeight);
+        gl.renderbufferStorageMultisample(gl.RENDERBUFFER, gl.getParameter(gl.MAX_SAMPLES), gl.RGBA8, this.drawFramebufferWidth, this.drawFramebufferHeight);
         gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, this.colorRenderbuffer);
         if(gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE) {
             console.error('could not complete render framebuffer setup')
@@ -430,12 +404,12 @@ export class DepthOfField {
         // depth texture setup
         this.depthTexture = this.#createAndSetupTexture(gl, gl.NEAREST, gl.NEAREST);
         gl.bindTexture(gl.TEXTURE_2D, this.depthTexture);
-        gl.texImage2D(this. gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, clientWidth, clientHeight, 0, gl.DEPTH_COMPONENT, gl.FLOAT, null);
+        gl.texImage2D(this. gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, this.drawFramebufferWidth, this.drawFramebufferHeight, 0, gl.DEPTH_COMPONENT, gl.FLOAT, null);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this.depthTexture, 0);   
         // color texture setup
         this.colorTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
         gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, clientWidth, clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.drawFramebufferWidth, this.drawFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.colorTexture, 0);
         if(gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE) {
             console.error('could not complete render framebuffer setup')
@@ -443,33 +417,42 @@ export class DepthOfField {
 
         /////////////////////////////////// DOF PACK COLOR AND COC PASS SETUP
 
+        this.dofPackedTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofPackedTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.drawFramebufferWidth, this.drawFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        this.dofPackedFramebuffer = this.#createFramebuffer(gl, [this.dofPackedTexture]);
+        if(gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE) {
+            console.error('could not complete dof pack framebuffer setup')
+        }
+
+        /////////////////////////////////// DOF BLUR HORIZONTAL PASS SETUP
+
         this.dofFramebufferWidth = clientWidth * this.DOF_TEXTURE_SCALE;
         this.dofFramebufferHeight = clientHeight * this.DOF_TEXTURE_SCALE;
 
-        this.dofPackedTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
-        gl.bindTexture(gl.TEXTURE_2D, this.dofPackedTexture);
+        this.dofBlurHMidFarTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurHMidFarTexture);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        this.dofPackedFramebuffer = this.#createFrameBuffer(gl, this.dofPackedTexture);
+        this.dofBlurHNearTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurHNearTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        this.dofBlurHFramebuffer = this.#createFramebuffer(gl, [this.dofBlurHMidFarTexture, this.dofBlurHNearTexture]);
+        if(gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE) {
+            console.error('could not complete dof blur horizontal framebuffer setup')
+        }
 
+        /////////////////////////////////// DOF BLUR VERTICAL PASS SETUP
 
-       /* this.framebufferTextureA = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
-        gl.bindTexture(gl.TEXTURE_2D, this.framebufferTextureA);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.clientWidth, gl.canvas.clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        this.framebufferA = this.#createFrameBuffer(this.framebufferTextureA);
-
-        this.framebufferTextureB = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
-        gl.bindTexture(gl.TEXTURE_2D, this.framebufferTextureB);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.clientWidth, gl.canvas.clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        this.framebufferB = this.#createFrameBuffer(this.framebufferTextureB);
-
-        this.framebufferTextureC = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
-        gl.bindTexture(gl.TEXTURE_2D, this.framebufferTextureC);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.clientWidth, gl.canvas.clientHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        this.framebufferC = this.#createFrameBuffer(this.framebufferTextureC);*/
-
-        this.blurUniforms = {
-            u_blurSize: 5
-        };
+        this.dofBlurVMidFarTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurVMidFarTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        this.dofBlurVNearTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurVNearTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        this.dofBlurVFramebuffer = this.#createFramebuffer(gl, [this.dofBlurVMidFarTexture, this.dofBlurVNearTexture]);
+        if(gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE) {
+            console.error('could not complete blur vertical framebuffer setup')
+        }
 
         this.resize();
 
@@ -481,15 +464,21 @@ export class DepthOfField {
         if (this.oninit) this.oninit(this);
     }
 
-    #createFrameBuffer(gl, texture) {
+    #createFramebuffer(gl, colorAttachements) {
         const fbo = gl.createFramebuffer();
+        const drawBuffers = [];
         gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-        gl.framebufferTexture2D(
-                gl.FRAMEBUFFER,       // target
-                gl.COLOR_ATTACHMENT0,  // attachment point
-                gl.TEXTURE_2D,        // texture target
-                texture,         // texture
+        colorAttachements.forEach((texture, ndx) => {
+            const attachmentPoint = gl[`COLOR_ATTACHMENT${ndx}`];
+            gl.framebufferTexture2D(
+                gl.FRAMEBUFFER,
+                attachmentPoint,
+                gl.TEXTURE_2D, 
+                texture,
                 0);
+            drawBuffers.push(attachmentPoint);
+        });
+        gl.drawBuffers(drawBuffers);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         return fbo;
     }
@@ -594,22 +583,21 @@ export class DepthOfField {
 
         // resize dof packed texture
         gl.bindTexture(gl.TEXTURE_2D, this.dofPackedTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.drawFramebufferWidth, this.drawFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+        // resize dof blur textures
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurHNearTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurHMidFarTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurVNearTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.bindTexture(gl.TEXTURE_2D, this.dofBlurVMidFarTexture);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.dofFramebufferWidth, this.dofFramebufferHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
         
         // reset bindings
         gl.bindRenderbuffer(gl.RENDERBUFFER, null);
         gl.bindTexture(gl.TEXTURE_2D, null);
-        
-        /*gl.bindTexture(gl.TEXTURE_2D, this.depthTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, this.canvasWidth, this.canvasHeight, 0, gl.DEPTH_COMPONENT, gl.FLOAT, new Float32Array(this.canvasWidth * this.canvasHeight));
-        gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.canvasWidth, this.canvasHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        gl.bindTexture(gl.TEXTURE_2D, this.framebufferTextureA);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.fboWidth, this.fboHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        gl.bindTexture(gl.TEXTURE_2D, this.framebufferTextureB);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.fboWidth, this.fboHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        gl.bindTexture(gl.TEXTURE_2D, this.framebufferTextureC);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.fboWidth, this.fboHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);*/
     }
 
     #updateCameraMatrix() {
@@ -619,15 +607,26 @@ export class DepthOfField {
 
     #updateProjectionMatrix(gl) {
         const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-        twgl.m4.perspective(Math.PI / 4, aspect, 1, 500, this.drawUniforms.u_projectionMatrix);
+        twgl.m4.perspective(Math.PI / 4, aspect, this.camera.near, this.camera.far, this.drawUniforms.u_projectionMatrix);
     }
 
     #initTweakpane() {
         if (this.pane) {
-            this.#createTweakpaneSlider(this.pane, this.camera.position, 0, 'camera.x', -100, 100, 1, () => this.#updateCameraMatrix());
-            this.#createTweakpaneSlider(this.pane, this.camera.position, 1, 'camera.y', -100, 100, 1, () => this.#updateCameraMatrix());
-            this.#createTweakpaneSlider(this.pane, this.camera.position, 2, 'camera.z', 50, 200, 1, () => this.#updateCameraMatrix());
-            this.#createTweakpaneSlider(this.pane, this, 'intermediatePreviewSize', 'Preview Size', 0, 1);
+            const maxFar = 700;
+
+            const cameraFolder = this.pane.addFolder({ title: 'Camera' });
+            this.#createTweakpaneSlider(cameraFolder, this.camera.position, 0, 'x', -100, 100, 1, () => this.#updateCameraMatrix());
+            this.#createTweakpaneSlider(cameraFolder, this.camera.position, 1, 'y', -100, 100, 1, () => this.#updateCameraMatrix());
+            this.#createTweakpaneSlider(cameraFolder, this.camera.position, 2, 'z', 50, 200, 1, () => this.#updateCameraMatrix());
+            this.#createTweakpaneSlider(cameraFolder, this.camera, 'near', 'near', 1, maxFar, null, () => this.#updateProjectionMatrix(this.gl));
+            this.#createTweakpaneSlider(cameraFolder, this.camera, 'far', 'far', 1, maxFar, null, () => this.#updateProjectionMatrix(this.gl));
+            const dofSettings = this.pane.addFolder({ title: 'DoF Settings' });
+            this.#createTweakpaneSlider(dofSettings, this.dof, 'nearBlurry', 'near blur', 0, maxFar);
+            this.#createTweakpaneSlider(dofSettings, this.dof, 'nearSharp', 'near sharp', 0, maxFar);
+            this.#createTweakpaneSlider(dofSettings, this.dof, 'farBlurry', 'far blur', 0, maxFar);
+            this.#createTweakpaneSlider(dofSettings, this.dof, 'farSharp', 'far sharp', 0, maxFar);
+            const passViewsFolder = this.pane.addFolder({ title: 'Render Passes' });
+            this.#createTweakpaneSlider(passViewsFolder, this, 'passPreviewSize', 'Preview Size', 0, 1);
         }
     }
 
