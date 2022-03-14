@@ -40,10 +40,10 @@ export class DepthOfField {
     };
 
     dof = {
-        nearBlurry: 0,
-        nearSharp: 10,
-        farSharp: 300,
-        farBlurry: 500
+        nearBlurry: 40,
+        nearSharp: 110,
+        farSharp: 200,
+        farBlurry: 280
     };
 
     constructor(canvas, pane, oninit = null) {
@@ -140,7 +140,9 @@ export class DepthOfField {
                 [this.dofPackLocations.u_nearBlurry, this.dof.nearBlurry],
                 [this.dofPackLocations.u_nearSharp, this.dof.nearSharp],
                 [this.dofPackLocations.u_farBlurry, this.dof.farBlurry],
-                [this.dofPackLocations.u_farSharp, this.dof.farSharp]
+                [this.dofPackLocations.u_farSharp, this.dof.farSharp],
+                [this.dofPackLocations.u_zNear, this.camera.near],
+                [this.dofPackLocations.u_zFar, this.camera.far]
             ]
         );
 
@@ -169,9 +171,9 @@ export class DepthOfField {
         this.#renderComposite(this.PASS_RESULT);
 
         // draw the pass overlays
-        let previewY = this.#renderPassPreview(0, this.PASS_RESULT);
-        previewY = this.#renderPassPreview(previewY, this.PASS_RESULT);
-        previewY = this.#renderPassPreview(previewY, this.PASS_RESULT);
+        let previewY = this.#renderPassPreview(0, this.PASS_COC);
+        //previewY = this.#renderPassPreview(previewY, this.PASS_RESULT);
+        //previewY = this.#renderPassPreview(previewY, this.PASS_RESULT);
     }
 
     #renderDofPass(fbo, w, h, program, locTex, locFloat = []) {
@@ -282,7 +284,9 @@ export class DepthOfField {
             u_nearBlurry: gl.getUniformLocation(this.dofPackProgram, 'u_nearBlurry'),
             u_nearSharp: gl.getUniformLocation(this.dofPackProgram, 'u_nearSharp'),
             u_farBlurry: gl.getUniformLocation(this.dofPackProgram, 'u_farBlurry'),
-            u_farSharp: gl.getUniformLocation(this.dofPackProgram, 'u_farSharp')
+            u_farSharp: gl.getUniformLocation(this.dofPackProgram, 'u_farSharp'),
+            u_zNear: gl.getUniformLocation(this.dofPackProgram, 'u_zNear'),
+            u_zFar: gl.getUniformLocation(this.dofPackProgram, 'u_zFar')
         };
         this.dofBlurHLocations = {
             a_position: gl.getAttribLocation(this.dofBlurHProgram, 'a_position'),
