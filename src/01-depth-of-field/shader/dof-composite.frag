@@ -16,15 +16,35 @@ float grayscale(vec3 c) {
 }
 
 void main() {
-    const int PASS_RESULT       = 0;
-    const int PASS_COC          = 1;
+    const int COMPOSITE_RESULT       = 0;
+    const int COMPOSITE_REGIONS      = 1;
+    const int COMPOSITE_NEAR_FIELD   = 2;
+    const int COMPOSITE_FAR_FIELD    = 3;
     
     vec4 packedColor = texture(u_packedTexture, v_uv);
     vec4 midFarBlurColor = texture(u_midFarBlurTexture, v_uv);
-    vec4 nearBlurTexture = texture(u_nearBlurTexture, v_uv);
+    vec4 nearBlurColor = texture(u_nearBlurTexture, v_uv);
+
+    // find the normalized CoC
+    vec2 texelSize = 1. / vec2(textureSize(u_packedTexture, 0)); 
+    float normCoCRadius = (packedColor.a * 2. - 1.);
+
+    // boost the coverage of near field
+    float nearCoverageBoost = 2.5;
+    float a = clamp(0., 1., nearCoverageBoost * nearBlurColor.a);
+    nearBlurColor.rgb = nearBlurColor.rgb * (a / max(nearBlurColor.a, 0.001));
+    nearBlurColor.a = a;
+
+    // increase influence of the near field
+    if (normCoCRadius > 0.1) {
+        normCoCRadius = min(normCoCRadius * 1.2, 1.0);
+    }
+
+    // mix the blurred near and mid/far with the original image
+    compositeColor = mix(packedColor, midFarBlurColor, abs(normCoCRadius)) * (1. - nearBlurColor.a) + vec4(nearBlurColor.rgb, 1.);
 
     switch(u_passIndex) {
-        case PASS_COC:
+        case COMPOSITE_REGIONS:
             float radius = packedColor.a;
             float gray = grayscale(packedColor.rgb);
             vec3 midColor = vec3(.3) * gray;
@@ -43,7 +63,13 @@ void main() {
                 compositeColor.rgb = strength * vec3(1.0, 0.1, 0.1) * vec3(gray) + (1. - strength) * midColor;
             }
             break;
+        case COMPOSITE_NEAR_FIELD:
+            compositeColor = nearBlurColor;
+            break;
+        case COMPOSITE_FAR_FIELD:
+            compositeColor = midFarBlurColor;
+            break;
         default:
-            compositeColor = packedColor;
+            compositeColor = compositeColor;
     }
 }

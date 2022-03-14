@@ -28,8 +28,10 @@ export class DepthOfField {
 
     DOF_TEXTURE_SCALE = .5;
 
-    PASS_COC = 1
-    PASS_RESULT = 0
+    COMPOSITE_RESULT = 0;
+    COMPOSITE_REGIONS = 1;
+    COMPOSITE_NEAR_FIELD = 2;
+    COMPOSITE_FAR_FIELD = 3;
 
     camera = {
         rotation: 0,
@@ -43,7 +45,8 @@ export class DepthOfField {
         nearBlurry: 40,
         nearSharp: 110,
         farSharp: 200,
-        farBlurry: 280
+        farBlurry: 280,
+        maxCoCRadius: 5
     };
 
     constructor(canvas, pane, oninit = null) {
@@ -153,6 +156,10 @@ export class DepthOfField {
             this.dofBlurHProgram,
             [
                 [this.dofBlurHLocations.u_packedTexture, this.dofPackedTexture]
+            ],
+            [],
+            [
+                [this.dofBlurHLocations.u_maxCoCRadius, this.dof.maxCoCRadius]
             ]
         );
 
@@ -168,15 +175,14 @@ export class DepthOfField {
         );
 
         // render the composite to the draw framebuffer
-        this.#renderComposite(this.PASS_RESULT);
+        this.#renderComposite(this.COMPOSITE_RESULT);
 
         // draw the pass overlays
-        let previewY = this.#renderPassPreview(0, this.PASS_COC);
-        //previewY = this.#renderPassPreview(previewY, this.PASS_RESULT);
-        //previewY = this.#renderPassPreview(previewY, this.PASS_RESULT);
+        let previewY = this.#renderPassPreview(0, this.COMPOSITE_REGIONS);
+        //previewY = this.#renderPassPreview(previewY, this.COMPOSITE_NEAR_FIELD);
     }
 
-    #renderDofPass(fbo, w, h, program, locTex, locFloat = []) {
+    #renderDofPass(fbo, w, h, program, locTex, locFloat = [], locInt = []) {
          /** @type {WebGLRenderingContext} */
          const gl = this.gl;
 
@@ -192,8 +198,12 @@ export class DepthOfField {
             gl.bindTexture(gl.TEXTURE_2D, texture);
         });
 
-        locFloat.forEach(([loc, value], ndx) => {
+        locFloat.forEach(([loc, value]) => {
             gl.uniform1f(loc, value);
+        });
+
+        locInt.forEach(([loc, value]) => {
+            gl.uniform1i(loc, value);
         });
 
         gl.drawElements(gl.TRIANGLES, this.quadBuffers.numElements, gl.UNSIGNED_SHORT, 0);
@@ -292,6 +302,7 @@ export class DepthOfField {
             a_position: gl.getAttribLocation(this.dofBlurHProgram, 'a_position'),
             a_uv: gl.getAttribLocation(this.dofBlurHProgram, 'a_uv'),
             u_packedTexture: gl.getUniformLocation(this.dofBlurHProgram, 'u_packedTexture'),
+            u_maxCoCRadius: gl.getUniformLocation(this.dofBlurHProgram, 'u_maxCoCRadius'),
         };
         this.dofBlurVLocations = {
             a_position: gl.getAttribLocation(this.dofBlurVProgram, 'a_position'),
@@ -625,6 +636,7 @@ export class DepthOfField {
             this.#createTweakpaneSlider(cameraFolder, this.camera, 'near', 'near', 1, maxFar, null, () => this.#updateProjectionMatrix(this.gl));
             this.#createTweakpaneSlider(cameraFolder, this.camera, 'far', 'far', 1, maxFar, null, () => this.#updateProjectionMatrix(this.gl));
             const dofSettings = this.pane.addFolder({ title: 'DoF Settings' });
+            this.#createTweakpaneSlider(dofSettings, this.dof, 'maxCoCRadius', 'radius', 0, 20, 1);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'nearBlurry', 'near blur', 0, maxFar);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'nearSharp', 'near sharp', 0, maxFar);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'farBlurry', 'far blur', 0, maxFar);
