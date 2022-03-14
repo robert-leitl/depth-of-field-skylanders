@@ -30,14 +30,14 @@ void main() {
     float normCoCRadius = (packedColor.a * 2. - 1.);
 
     // boost the coverage of near field
-    float nearCoverageBoost = 2.5;
+    float nearCoverageBoost = 3.5;
     float a = clamp(0., 1., nearCoverageBoost * nearBlurColor.a);
     nearBlurColor.rgb = nearBlurColor.rgb * (a / max(nearBlurColor.a, 0.001));
     nearBlurColor.a = a;
 
     // increase influence of the near field
     if (normCoCRadius > 0.1) {
-        normCoCRadius = min(normCoCRadius * 1.2, 1.0);
+        normCoCRadius = min(normCoCRadius * 1.8, 1.0);
     }
 
     // mix the blurred near and mid/far with the original image

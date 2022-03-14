@@ -12,18 +12,14 @@ import dofBlurVFragShaderSource from './shader/dof-blur-v.frag';
 import dofCompositeVertShaderSource from './shader/dof-composite.vert';
 import dofCompositeFragShaderSource from './shader/dof-composite.frag';
 
-/*
-Credits:
-- https://casual-effects.blogspot.com/2013/09/the-skylanders-swap-force-depth-of.html
-- https://www.slideshare.net/DICEStudio/five-rendering-ideas-from-battlefield-3-need-for-speed-the-run
-*/
-
 export class DepthOfField {
     oninit;
 
     #time = 0;
     #deltaTime = 0;
     #isDestroyed = false;
+
+    enablePreviews = false;
     passPreviewSize = 1 / 6;
 
     DOF_TEXTURE_SCALE = .5;
@@ -34,7 +30,7 @@ export class DepthOfField {
     COMPOSITE_FAR_FIELD = 3;
 
     camera = {
-        rotation: 0,
+        rotation: [0, 0, 0],
         position: [0, 0, 150],
         matrix: twgl.m4.identity(),
         near: 1,
@@ -46,7 +42,7 @@ export class DepthOfField {
         nearSharp: 110,
         farSharp: 200,
         farBlurry: 280,
-        maxCoCRadius: 5
+        maxCoCRadius: 10
     };
 
     constructor(canvas, pane, oninit = null) {
@@ -75,6 +71,8 @@ export class DepthOfField {
         this.#time = time;
 
         if (this.#isDestroyed) return;
+
+        this.#updateCameraOrbit();
 
         this.drawUniforms.u_deltaTime = this.#deltaTime;
         this.drawUniforms.u_worldInverseTransposeMatrix = twgl.m4.transpose(twgl.m4.inverse(this.drawUniforms.u_worldMatrix));
@@ -171,15 +169,21 @@ export class DepthOfField {
             [
                 [this.dofBlurVLocations.u_midFarBlurTexture, this.dofBlurHMidFarTexture],
                 [this.dofBlurVLocations.u_nearBlurTexture, this.dofBlurHNearTexture]
+            ],
+            [],
+            [
+                [this.dofBlurVLocations.u_maxCoCRadius, this.dof.maxCoCRadius]
             ]
         );
 
         // render the composite to the draw framebuffer
         this.#renderComposite(this.COMPOSITE_RESULT);
 
-        // draw the pass overlays
-        let previewY = this.#renderPassPreview(0, this.COMPOSITE_REGIONS);
-        //previewY = this.#renderPassPreview(previewY, this.COMPOSITE_NEAR_FIELD);
+        if (this.enablePreviews) {
+            // draw the pass overlays
+            let previewY = this.#renderPassPreview(0, this.COMPOSITE_REGIONS);
+            //previewY = this.#renderPassPreview(previewY, this.COMPOSITE_NEAR_FIELD);
+        }
     }
 
     #renderDofPass(fbo, w, h, program, locTex, locFloat = [], locInt = []) {
@@ -309,6 +313,7 @@ export class DepthOfField {
             a_uv: gl.getAttribLocation(this.dofBlurVProgram, 'a_uv'),
             u_midFarBlurTexture: gl.getUniformLocation(this.dofBlurVProgram, 'u_midFarBlurTexture'),
             u_nearBlurTexture: gl.getUniformLocation(this.dofBlurVProgram, 'u_nearBlurTexture'),
+            u_maxCoCRadius: gl.getUniformLocation(this.dofBlurVProgram, 'u_maxCoCRadius'),
         };
         this.dofCompositeLocations = {
             a_position: gl.getAttribLocation(this.dofCompositeProgram, 'a_position'),
@@ -474,9 +479,50 @@ export class DepthOfField {
         this.#updateCameraMatrix();
         this.#updateProjectionMatrix(gl);
 
+        this.#initOrbitControls();
         this.#initTweakpane();
 
         if (this.oninit) this.oninit(this);
+    }
+
+    #initOrbitControls() {
+        this.pointerDown = false;
+        this.pointerDownPos = { x: 0, y: 0 };
+        this.pointerPos = { x: 0, y: 0 };
+        this.pointerFollowPos = { x: 0, y: 0 };
+
+        this.canvas.addEventListener('pointerdown', e => {
+            this.pointerDownPos = { x: e.clientX, y: e.clientY }
+            this.pointerFollowPos = { x: e.clientX, y: e.clientY }
+            this.pointerPos = { x: e.clientX, y: e.clientY }
+            this.pointerDownCameraPosition = [...this.camera.position];
+            this.pointerDown = true;
+        });
+        this.canvas.addEventListener('pointerup', e => {
+            this.pointerDown = false;
+        });
+        this.canvas.addEventListener('pointermove', e => {
+            if (this.pointerDown) {
+                this.pointerPos = { x: e.clientX, y: e.clientY }
+            }
+        });
+    }
+
+    #updateCameraOrbit() {
+        if (this.pointerDown) {
+            const damping = 3;
+            const speed = 0.001;
+            this.pointerFollowPos.x += (this.pointerPos.x - this.pointerFollowPos.x) / damping;
+            this.pointerFollowPos.y += (this.pointerPos.y - this.pointerFollowPos.y) / damping;
+
+            const rY = -(this.pointerFollowPos.x - this.pointerDownPos.x) * speed;
+            const rX = -(this.pointerFollowPos.y - this.pointerDownPos.y) * speed;
+
+            const mX = twgl.m4.axisRotate(twgl.m4.identity(), [1, 0, 0], rX);
+            const m = twgl.m4.axisRotate(mX, [0, 1, 0], rY);
+            this.camera.position = twgl.m4.transformPoint(m, this.pointerDownCameraPosition);
+            this.#updateCameraMatrix();
+        }
     }
 
     #createFramebuffer(gl, colorAttachements) {
@@ -630,19 +676,20 @@ export class DepthOfField {
             const maxFar = 700;
 
             const cameraFolder = this.pane.addFolder({ title: 'Camera' });
-            this.#createTweakpaneSlider(cameraFolder, this.camera.position, 0, 'x', -100, 100, 1, () => this.#updateCameraMatrix());
+            /*this.#createTweakpaneSlider(cameraFolder, this.camera.position, 0, 'x', -100, 100, 1, () => this.#updateCameraMatrix());
             this.#createTweakpaneSlider(cameraFolder, this.camera.position, 1, 'y', -100, 100, 1, () => this.#updateCameraMatrix());
-            this.#createTweakpaneSlider(cameraFolder, this.camera.position, 2, 'z', 50, 200, 1, () => this.#updateCameraMatrix());
+            this.#createTweakpaneSlider(cameraFolder, this.camera.position, 2, 'z', 50, 200, 1, () => this.#updateCameraMatrix());*/
             this.#createTweakpaneSlider(cameraFolder, this.camera, 'near', 'near', 1, maxFar, null, () => this.#updateProjectionMatrix(this.gl));
             this.#createTweakpaneSlider(cameraFolder, this.camera, 'far', 'far', 1, maxFar, null, () => this.#updateProjectionMatrix(this.gl));
             const dofSettings = this.pane.addFolder({ title: 'DoF Settings' });
-            this.#createTweakpaneSlider(dofSettings, this.dof, 'maxCoCRadius', 'radius', 0, 20, 1);
+            this.#createTweakpaneSlider(dofSettings, this.dof, 'maxCoCRadius', 'radius', 0, 30, 1);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'nearBlurry', 'near blur', 0, maxFar);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'nearSharp', 'near sharp', 0, maxFar);
-            this.#createTweakpaneSlider(dofSettings, this.dof, 'farBlurry', 'far blur', 0, maxFar);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'farSharp', 'far sharp', 0, maxFar);
+            this.#createTweakpaneSlider(dofSettings, this.dof, 'farBlurry', 'far blur', 0, maxFar);
             const passViewsFolder = this.pane.addFolder({ title: 'Render Passes' });
-            this.#createTweakpaneSlider(passViewsFolder, this, 'passPreviewSize', 'Preview Size', 0, 1);
+            passViewsFolder.addInput(this, 'enablePreviews', { label: 'enable' });
+            this.#createTweakpaneSlider(passViewsFolder, this, 'passPreviewSize', 'size', 0, 1);
         }
     }
 
