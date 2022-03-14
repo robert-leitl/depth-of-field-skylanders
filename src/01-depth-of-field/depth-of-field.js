@@ -19,7 +19,10 @@ export class DepthOfField {
     #deltaTime = 0;
     #isDestroyed = false;
 
-    enablePreviews = false;
+    enableRegionsPreview = false;
+    enableFarMidPreview = false;
+    enableNearPreview = false;
+    enablePackedPreview = false;
     passPreviewSize = 1 / 6;
 
     DOF_TEXTURE_SCALE = .5;
@@ -28,6 +31,7 @@ export class DepthOfField {
     COMPOSITE_REGIONS = 1;
     COMPOSITE_NEAR_FIELD = 2;
     COMPOSITE_FAR_FIELD = 3;
+    COMPOSITE_PACKED = 4;
 
     camera = {
         rotation: [0, 0, 0],
@@ -179,11 +183,17 @@ export class DepthOfField {
         // render the composite to the draw framebuffer
         this.#renderComposite(this.COMPOSITE_RESULT);
 
-        if (this.enablePreviews) {
-            // draw the pass overlays
-            let previewY = this.#renderPassPreview(0, this.COMPOSITE_REGIONS);
-            //previewY = this.#renderPassPreview(previewY, this.COMPOSITE_NEAR_FIELD);
-        }
+        
+        // draw the pass overlays
+        let previewY = 0;
+        if (this.enableRegionsPreview)
+            previewY = this.#renderPassPreview(0, this.COMPOSITE_REGIONS);
+        if (this.enableFarMidPreview)
+            previewY = this.#renderPassPreview(previewY, this.COMPOSITE_FAR_FIELD);
+        if (this.enableNearPreview)
+            previewY = this.#renderPassPreview(previewY, this.COMPOSITE_NEAR_FIELD);
+        if (this.enablePackedPreview)
+            previewY = this.#renderPassPreview(previewY, this.COMPOSITE_PACKED);
     }
 
     #renderDofPass(fbo, w, h, program, locTex, locFloat = [], locInt = []) {
@@ -250,6 +260,10 @@ export class DepthOfField {
         gl.uniform1i(this.dofCompositeLocations.u_nearBlurTexture, 2);
         gl.activeTexture(gl.TEXTURE2);
         gl.bindTexture(gl.TEXTURE_2D, this.dofBlurVNearTexture);
+
+        gl.uniform1i(this.dofCompositeLocations.u_sourceColorTexture, 3);
+        gl.activeTexture(gl.TEXTURE3);
+        gl.bindTexture(gl.TEXTURE_2D, this.colorTexture);
 
         gl.uniform1i(this.dofCompositeLocations.u_passIndex, passIndex);
         
@@ -321,7 +335,8 @@ export class DepthOfField {
             u_packedTexture: gl.getUniformLocation(this.dofCompositeProgram, 'u_packedTexture'),
             u_midFarBlurTexture: gl.getUniformLocation(this.dofCompositeProgram, 'u_midFarBlurTexture'),
             u_nearBlurTexture: gl.getUniformLocation(this.dofCompositeProgram, 'u_nearBlurTexture'),
-            u_passIndex: gl.getUniformLocation(this.dofCompositeProgram, 'u_passIndex')
+            u_passIndex: gl.getUniformLocation(this.dofCompositeProgram, 'u_passIndex'),
+            u_sourceColorTexture: gl.getUniformLocation(this.dofCompositeProgram, 'u_sourceColorTexture')
         };
 
         // setup uniforms
@@ -688,7 +703,10 @@ export class DepthOfField {
             this.#createTweakpaneSlider(dofSettings, this.dof, 'farSharp', 'far sharp', 0, maxFar);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'farBlurry', 'far blur', 0, maxFar);
             const passViewsFolder = this.pane.addFolder({ title: 'Render Passes' });
-            passViewsFolder.addInput(this, 'enablePreviews', { label: 'enable' });
+            passViewsFolder.addInput(this, 'enableRegionsPreview', { label: 'regions' });
+            passViewsFolder.addInput(this, 'enableFarMidPreview', { label: 'far/mid' });
+            passViewsFolder.addInput(this, 'enableNearPreview', { label: 'near' });
+            passViewsFolder.addInput(this, 'enablePackedPreview', { label: 'packed' });
             this.#createTweakpaneSlider(passViewsFolder, this, 'passPreviewSize', 'size', 0, 1);
         }
     }

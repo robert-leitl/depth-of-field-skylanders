@@ -2,6 +2,7 @@
 
 precision highp float;
 
+uniform sampler2D u_sourceColorTexture;
 uniform sampler2D u_packedTexture;
 uniform sampler2D u_midFarBlurTexture;
 uniform sampler2D u_nearBlurTexture;
@@ -20,7 +21,9 @@ void main() {
     const int COMPOSITE_REGIONS      = 1;
     const int COMPOSITE_NEAR_FIELD   = 2;
     const int COMPOSITE_FAR_FIELD    = 3;
+    const int COMPOSITE_PACKED       = 4;
     
+    vec4 sourceColor = texture(u_sourceColorTexture, v_uv);
     vec4 packedColor = texture(u_packedTexture, v_uv);
     vec4 midFarBlurColor = texture(u_midFarBlurTexture, v_uv);
     vec4 nearBlurColor = texture(u_nearBlurTexture, v_uv);
@@ -30,7 +33,7 @@ void main() {
     float normCoCRadius = (packedColor.a * 2. - 1.);
 
     // boost the coverage of near field
-    float nearCoverageBoost = 3.5;
+    float nearCoverageBoost = 4.;
     float a = clamp(0., 1., nearCoverageBoost * nearBlurColor.a);
     nearBlurColor.rgb = nearBlurColor.rgb * (a / max(nearBlurColor.a, 0.001));
     nearBlurColor.a = a;
@@ -41,7 +44,7 @@ void main() {
     }
 
     // mix the blurred near and mid/far with the original image
-    compositeColor = mix(packedColor, midFarBlurColor, abs(normCoCRadius)) * (1. - nearBlurColor.a) + vec4(nearBlurColor.rgb, 1.);
+    compositeColor = mix(sourceColor, midFarBlurColor, abs(normCoCRadius)) * (1. - nearBlurColor.a) + nearBlurColor;
 
     switch(u_passIndex) {
         case COMPOSITE_REGIONS:
@@ -69,6 +72,8 @@ void main() {
         case COMPOSITE_FAR_FIELD:
             compositeColor = midFarBlurColor;
             break;
+        case COMPOSITE_PACKED:
+            compositeColor = packedColor;
         default:
             compositeColor = compositeColor;
     }

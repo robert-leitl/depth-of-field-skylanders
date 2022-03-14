@@ -36,7 +36,7 @@ void depthOfFieldBlur(
     float nearWeightSum = 0.;
 
     // rapidly goes to 1 when within the near field
-    float nearFieldnessA = clamp(radiusA * 3.0, 0., 1.);
+    float nearFieldnessA = clamp(radiusA * 2.0, 0., 1.);
 
     vec2 direction = vec2(float(isHorizontal), float(!isHorizontal));
 
@@ -93,11 +93,15 @@ void depthOfFieldBlur(
         // simple box blur for the near field
         float nearWeight = 1.;
         nearResult += near * nearWeight;
-        nearWeightSum += 1.;
+        nearWeightSum += nearWeight;
     }
 
-    // forward the normalized CoC to the next pass
-    midFarResult.a = packedA.a;
+    if (isHorizontal) {
+        // forward the normalized CoC to the next pass
+        midFarResult.a = packedA.a;
+    } else {
+        midFarResult.a = 1.;
+    }
 
     // apply total weights
     midFarResult.rgb /= midFarWeightSum;
