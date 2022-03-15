@@ -16,6 +16,7 @@ export class DepthOfField {
     oninit;
 
     #time = 0;
+    #frames = 0;
     #deltaTime = 0;
     #isDestroyed = false;
 
@@ -23,7 +24,8 @@ export class DepthOfField {
     enableFarMidPreview = false;
     enableNearPreview = false;
     enablePackedPreview = false;
-    passPreviewSize = 1 / 6;
+    enableCoCPreview = false;
+    passPreviewSize = 1;
 
     DOF_TEXTURE_SCALE = .5;
 
@@ -32,6 +34,7 @@ export class DepthOfField {
     COMPOSITE_NEAR_FIELD = 2;
     COMPOSITE_FAR_FIELD = 3;
     COMPOSITE_PACKED = 4;
+    COMPOSITE_COC = 5;
 
     camera = {
         rotation: [0, 0, 0],
@@ -46,8 +49,10 @@ export class DepthOfField {
         nearSharp: 110,
         farSharp: 200,
         farBlurry: 280,
-        maxCoCRadius: 10
+        maxCoCRadius: 15
     };
+
+    instances = [];
 
     constructor(canvas, pane, oninit = null) {
         this.canvas = canvas;
@@ -73,6 +78,7 @@ export class DepthOfField {
     run(time = 0) {
         this.#deltaTime = time - this.#time;
         this.#time = time;
+        this.#frames += this.#deltaTime / 16;
 
         if (this.#isDestroyed) return;
 
@@ -82,7 +88,14 @@ export class DepthOfField {
         this.drawUniforms.u_worldInverseTransposeMatrix = twgl.m4.transpose(twgl.m4.inverse(this.drawUniforms.u_worldMatrix));
 
         this.instanceMatrices.forEach((mat, ndx) => {
-            twgl.m4.rotateY(mat, this.#deltaTime * 0.000001 * (ndx + 1), mat);
+            const instance = this.instances[ndx];
+            const m = twgl.m4.identity();
+            twgl.m4.translate(m, instance.translation, m);
+            twgl.m4.rotateX(m, instance.rotation[0] + this.#frames * instance.rotationSpeed * .5, m);
+            twgl.m4.rotateY(m, instance.rotation[1] + this.#frames * instance.rotationSpeed, m);
+            twgl.m4.rotateZ(m, instance.rotation[2], m);
+            twgl.m4.scale(m, instance.scale, mat);
+            
         });
 
         this.#render();
@@ -94,29 +107,33 @@ export class DepthOfField {
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
 
-        // Draw
         gl.clearColor(0, 0, 0, 1);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         gl.enable(gl.DEPTH_TEST);
         gl.enable(gl.CULL_FACE);
+
+        // draw depth and color 
+        this.#setFramebuffer(gl, this.drawFramebuffer, this.drawFramebufferWidth, this.drawFramebufferHeight);
+
+        // draw the instances
         gl.useProgram(this.drawProgram);
-        gl.bindVertexArray(this.cubeVAO);
+        gl.bindVertexArray(this.objectVAO);
         // upload the instance matrix buffer
         gl.bindBuffer(gl.ARRAY_BUFFER, this.matrixBuffer);
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.instanceMatricesArray);
-        //gl.uniform1f(this.drawLocations.u_deltaTime, this.drawUniforms.u_deltaTime);
         gl.uniformMatrix4fv(this.drawLocations.u_worldMatrix, false, this.drawUniforms.u_worldMatrix);
         gl.uniformMatrix4fv(this.drawLocations.u_viewMatrix, false, this.drawUniforms.u_viewMatrix);
         gl.uniformMatrix4fv(this.drawLocations.u_projectionMatrix, false, this.drawUniforms.u_projectionMatrix);
         gl.uniformMatrix4fv(this.drawLocations.u_worldInverseTransposeMatrix, false, this.drawUniforms.u_worldInverseTransposeMatrix);
-
-        // draw depth and color 
-        this.#setFramebuffer(gl, this.drawFramebuffer, this.drawFramebufferWidth, this.drawFramebufferHeight);
-        gl.clearBufferfv(gl.COLOR, 0, [0., 0., 0., 1.]);
+        gl.uniform3f(this.drawLocations.u_cameraPosition, this.camera.position[0], this.camera.position[1], this.camera.position[2]);
+        gl.uniform1i(this.drawLocations.u_envMap, 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.envMapTexture);
+        gl.clearBufferfv(gl.COLOR, 0, [1.0, 0.4, 0.6, 0.]);
         gl.clearBufferfv(gl.DEPTH, 0, [1.]);
         gl.drawElementsInstanced(
             gl.TRIANGLES,
-            this.cubeBuffers.numElements,
+            this.objectBuffers.numElements,
             gl.UNSIGNED_SHORT,
             0,
             this.numInstances
@@ -194,6 +211,8 @@ export class DepthOfField {
             previewY = this.#renderPassPreview(previewY, this.COMPOSITE_NEAR_FIELD);
         if (this.enablePackedPreview)
             previewY = this.#renderPassPreview(previewY, this.COMPOSITE_PACKED);
+        if (this.enableCoCPreview)
+            previewY = this.#renderPassPreview(previewY, this.COMPOSITE_COC);
     }
 
     #renderDofPass(fbo, w, h, program, locTex, locFloat = [], locInt = []) {
@@ -301,8 +320,9 @@ export class DepthOfField {
             u_worldMatrix: gl.getUniformLocation(this.drawProgram, 'u_worldMatrix'),
             u_viewMatrix: gl.getUniformLocation(this.drawProgram, 'u_viewMatrix'),
             u_projectionMatrix: gl.getUniformLocation(this.drawProgram, 'u_projectionMatrix'),
-            u_worldInverseTransposeMatrix: gl.getUniformLocation(this.drawProgram, 'u_worldInverseTransposeMatrix')
-            //u_deltaTime: gl.getUniformLocation(this.drawProgram, 'u_deltaTime')
+            u_worldInverseTransposeMatrix: gl.getUniformLocation(this.drawProgram, 'u_worldInverseTransposeMatrix'),
+            u_envMap: gl.getUniformLocation(this.drawProgram, 'u_envMap'),
+            u_cameraPosition: gl.getUniformLocation(this.drawProgram, 'u_cameraPosition')
         };
         this.dofPackLocations = {
             a_position: gl.getAttribLocation(this.dofPackProgram, 'a_position'),
@@ -349,13 +369,13 @@ export class DepthOfField {
 
         /////////////////////////////////// GEOMETRY / MESH SETUP
 
-        // create cube VAO
-        this.cubeBuffers = twgl.primitives.createCubeBuffers(gl);
-        this.cubeVAO = this.#makeVertexArray(gl, [
-            [this.cubeBuffers.position, this.drawLocations.a_position, 3],
-            [this.cubeBuffers.normal, this.drawLocations.a_normal, 3],
-            [this.cubeBuffers.texcoord, this.drawLocations.a_uv, 2],
-        ], this.cubeBuffers.indices);
+        // create object VAO
+        this.objectBuffers = twgl.primitives.createTorusBuffers(gl, .8, 0.25, 32, 32);
+        this.objectVAO = this.#makeVertexArray(gl, [
+            [this.objectBuffers.position, this.drawLocations.a_position, 3],
+            [this.objectBuffers.normal, this.drawLocations.a_normal, 3],
+            [this.objectBuffers.texcoord, this.drawLocations.a_uv, 2],
+        ], this.objectBuffers.indices);
 
         // create quad VAO
         this.quadBuffers = twgl.primitives.createXYQuadBuffers(gl);
@@ -366,14 +386,15 @@ export class DepthOfField {
 
 
         // instances setup
-        gl.bindVertexArray(this.cubeVAO);
-        this.gridSize = 6;
+        gl.bindVertexArray(this.objectVAO);
+        this.gridSize = 5;
         this.numInstances = this.gridSize * this.gridSize * this.gridSize;
         this.instanceMatricesArray = new Float32Array(this.numInstances * 16);
         this.instanceMatrices = [];
         const layerCount = this.gridSize * this.gridSize;
-        const spacing = 62;
+        const spacing = 82;
         const offset = Math.floor(this.gridSize / 2);
+        const spacingOffset = spacing / 1.5;
         for(let i=0; i<this.numInstances; ++i) {
             const x = i % this.gridSize - offset;
             const z = Math.floor(i / layerCount) - offset;
@@ -382,6 +403,22 @@ export class DepthOfField {
             const instanceMatrixArray = new Float32Array(this.instanceMatricesArray.buffer, i * 16 * 4, 16);
             instanceMatrixArray.set(instanceMatrix);
             this.instanceMatrices.push(instanceMatrixArray);
+
+            const scale = (Math.random() + 0.5) * 3.;
+            this.instances.push({
+                translation: [
+                    x * spacing + (Math.random() * spacingOffset - spacingOffset / 2),
+                    y * spacing + (Math.random() * spacingOffset - spacingOffset / 2),
+                    z * spacing + (Math.random() * spacingOffset - spacingOffset / 2)
+                ],
+                scale: [scale, scale, scale],
+                rotation: [
+                    Math.random() * Math.PI * 2,
+                    Math.random() * Math.PI * 2,
+                    Math.random() * Math.PI * 2
+                ],
+                rotationSpeed: (Math.random() * 2 - 1) * 0.01
+            });
         }
         this.matrixBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, this.matrixBuffer);
@@ -494,10 +531,26 @@ export class DepthOfField {
         this.#updateCameraMatrix();
         this.#updateProjectionMatrix(gl);
 
+        this.initEnvMap();
         this.#initOrbitControls();
         this.#initTweakpane();
 
         if (this.oninit) this.oninit(this);
+    }
+
+    initEnvMap() {
+        const gl = this.gl;
+
+        this.envMapTexture = this.#createAndSetupTexture(gl, gl.LINEAR, gl.LINEAR);
+        gl.bindTexture(gl.TEXTURE_2D, this.envMapTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2000, 1000, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+        const img = new Image();
+        img.src = new URL('../assets/studio017.jpg', import.meta.url);
+        img.addEventListener('load', () => {
+            gl.bindTexture(gl.TEXTURE_2D, this.envMapTexture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2000, 1000, 0, gl.RGBA, gl.UNSIGNED_BYTE, img);
+        });
     }
 
     #initOrbitControls() {
@@ -707,6 +760,7 @@ export class DepthOfField {
             passViewsFolder.addInput(this, 'enableFarMidPreview', { label: 'far/mid' });
             passViewsFolder.addInput(this, 'enableNearPreview', { label: 'near' });
             passViewsFolder.addInput(this, 'enablePackedPreview', { label: 'packed' });
+            passViewsFolder.addInput(this, 'enableCoCPreview', { label: 'coc' });
             this.#createTweakpaneSlider(passViewsFolder, this, 'passPreviewSize', 'size', 0, 1);
         }
     }

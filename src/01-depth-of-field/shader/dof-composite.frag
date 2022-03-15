@@ -22,6 +22,7 @@ void main() {
     const int COMPOSITE_NEAR_FIELD   = 2;
     const int COMPOSITE_FAR_FIELD    = 3;
     const int COMPOSITE_PACKED       = 4;
+    const int COMPOSITE_COC          = 5;
     
     vec4 sourceColor = texture(u_sourceColorTexture, v_uv);
     vec4 packedColor = texture(u_packedTexture, v_uv);
@@ -40,7 +41,7 @@ void main() {
 
     // increase influence of the near field
     if (normCoCRadius > 0.1) {
-        normCoCRadius = min(normCoCRadius * 1.8, 1.0);
+        normCoCRadius = min(normCoCRadius * 1.4, 1.0);
     }
 
     // mix the blurred near and mid/far with the original image
@@ -65,6 +66,9 @@ void main() {
                 float strength = (.5 - radius) * 2.;
                 compositeColor.rgb = strength * vec3(1.0, 0.1, 0.1) * vec3(gray) + (1. - strength) * midColor;
             }
+            break;
+        case COMPOSITE_COC:
+            compositeColor = vec4(packedColor.a);
             break;
         case COMPOSITE_NEAR_FIELD:
             compositeColor = nearBlurColor;

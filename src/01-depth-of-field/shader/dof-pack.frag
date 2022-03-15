@@ -23,12 +23,10 @@ float zFromDepth(float depth, float zNear, float zFar) {
 void main() {
     float tmp = u_nearBlurry + u_nearSharp + u_farBlurry + u_farSharp;
 
-    // the non-linear depth value [0, 1]
-    vec2 resolution = vec2(textureSize(u_depth, 0));
-    float depth = texture(u_depth, v_uv).x;
+    vec4 color = texture(u_color, v_uv);
 
-    // TODO do not use uv coordinates for passes
-    depth = texelFetch(u_depth, ivec2(v_uv * resolution + vec2(-.25, 0.5)), 0).r;
+    // the non-linear depth value [0, 1]
+    float depth = texture(u_depth, v_uv).x;
 
     // the reconstructed z-value in view space
     float z = zFromDepth(depth, u_zNear, u_zFar);
@@ -41,13 +39,10 @@ void main() {
     } else if (z > u_farSharp) {
         radius = - (min(z, u_farBlurry) - u_farSharp) / (u_farBlurry - u_farSharp);
     } else {
-        radius = 0.0;
+        radius = 0.;
     }
-
-    radius = clamp(0., 1., radius);
 
     radius = radius * .5 + .5;
 
-    vec4 color = texture(u_color, v_uv);
     packed = vec4(color.rgb, radius);
 }
