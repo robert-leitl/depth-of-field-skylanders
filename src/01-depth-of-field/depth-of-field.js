@@ -47,10 +47,10 @@ export class DepthOfField {
     dof = {
         nearBlurry: 40,
         nearSharp: 110,
-        farSharp: 200,
-        farBlurry: 280,
+        farSharp: 130,
+        farBlurry: 240,
         maxCoCRadius: 15,
-        radiusScale: 1.5
+        radiusScale: 2
     };
 
     instances = [];
@@ -130,7 +130,7 @@ export class DepthOfField {
         gl.uniform1i(this.drawLocations.u_envMap, 0);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.envMapTexture);
-        gl.clearBufferfv(gl.COLOR, 0, [1.0, 0.4, 0.6, 0.]);
+        gl.clearBufferfv(gl.COLOR, 0, [1.0, 0.3, 0.5, 0.]);
         gl.clearBufferfv(gl.DEPTH, 0, [1.]);
         gl.drawElementsInstanced(
             gl.TRIANGLES,
@@ -377,7 +377,7 @@ export class DepthOfField {
         /////////////////////////////////// GEOMETRY / MESH SETUP
 
         // create object VAO
-        this.objectBuffers = twgl.primitives.createTorusBuffers(gl, .7, 0.25, 64, 16);
+        this.objectBuffers = twgl.primitives.createTorusBuffers(gl, 1.7, 0.25, 64, 16);
         this.objectVAO = this.#makeVertexArray(gl, [
             [this.objectBuffers.position, this.drawLocations.a_position, 3],
             [this.objectBuffers.normal, this.drawLocations.a_normal, 3],
@@ -394,7 +394,7 @@ export class DepthOfField {
 
         // instances setup
         gl.bindVertexArray(this.objectVAO);
-        this.gridSize = 5;
+        this.gridSize = 2;
         this.numInstances = this.gridSize * this.gridSize * this.gridSize;
         this.instanceMatricesArray = new Float32Array(this.numInstances * 16);
         this.instanceMatrices = [];
@@ -424,7 +424,7 @@ export class DepthOfField {
                     Math.random() * Math.PI * 2,
                     Math.random() * Math.PI * 2
                 ],
-                rotationSpeed: (Math.random() * 2 - 1) * 0.01
+                rotationSpeed: (Math.random() * 2 - 1) * 0.001
             });
         }
         this.matrixBuffer = gl.createBuffer();

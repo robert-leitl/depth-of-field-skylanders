@@ -51,7 +51,7 @@ void main() {
         case COMPOSITE_REGIONS:
             float radius = packedColor.a;
             float gray = grayscale(packedColor.rgb);
-            gray = radius;
+            gray = packedColor.a * 2.;
             vec3 midColor = vec3(.3) * gray;
             compositeColor = vec4(1.);
 

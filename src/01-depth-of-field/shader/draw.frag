@@ -45,11 +45,11 @@ void main() {
 	// Sample equirectangular texture.
     vec4 envMapColor = texture(u_envMap, equiPos);
 
-    float fog = smoothstep(100., 400., length(v_surfaceToView));
+    float fog = smoothstep(100., 300., length(v_surfaceToView));
 
     float fresnel = 1. - smoothstep(0.4, .7, nDv);
 
     outColor = envMapColor + (fog * vec4(1.0, 0.4, 0.6, 1.));
     outColor *= fresnel;
-    outColor = clamp(vec4(0.), vec4(1.), pow(outColor, vec4(1.8)));
+    outColor = clamp(vec4(0.), vec4(1.), pow(outColor, vec4(1.2)));
 }
