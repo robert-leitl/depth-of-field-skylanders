@@ -5,6 +5,7 @@ precision highp float;
 uniform sampler2D u_midFarBlurTexture;
 uniform sampler2D u_nearBlurTexture;
 uniform int u_maxCoCRadius;
+uniform float u_radiusScale;
 
 in vec2 v_uv;
 
@@ -18,6 +19,7 @@ void main() {
         false,
         v_uv,
         u_maxCoCRadius,
+        u_radiusScale,
         u_midFarBlurTexture,
         u_nearBlurTexture,
         outMidFarColor,

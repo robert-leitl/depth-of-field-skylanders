@@ -38,18 +38,18 @@ void main() {
     vec3 r = nDv * n * 2. - v;
 
     // Convert Cartesian direction vector to spherical coordinates.
-	float phi   = atan(-r.z, r.x);
+	float phi   = atan(r.z, r.x);
 	float theta = acos(r.y);
     vec2 equiPos = vec2(phi / (2. * PI), theta / PI);
 
 	// Sample equirectangular texture.
     vec4 envMapColor = texture(u_envMap, equiPos);
 
-    float fog = smoothstep(200., 300., length(v_surfaceToView));
+    float fog = smoothstep(100., 400., length(v_surfaceToView));
 
-    float fresnel = 1. - smoothstep(0.4, 1., nDv);
+    float fresnel = 1. - smoothstep(0.4, .7, nDv);
 
     outColor = envMapColor + (fog * vec4(1.0, 0.4, 0.6, 1.));
     outColor *= fresnel;
-    outColor = clamp(vec4(0.), vec4(1.), outColor * outColor);
+    outColor = clamp(vec4(0.), vec4(1.), pow(outColor, vec4(1.8)));
 }

@@ -49,7 +49,8 @@ export class DepthOfField {
         nearSharp: 110,
         farSharp: 200,
         farBlurry: 280,
-        maxCoCRadius: 15
+        maxCoCRadius: 15,
+        radiusScale: 1.5
     };
 
     instances = [];
@@ -176,7 +177,9 @@ export class DepthOfField {
             [
                 [this.dofBlurHLocations.u_packedTexture, this.dofPackedTexture]
             ],
-            [],
+            [,
+                [this.dofBlurHLocations.u_radiusScale, this.dof.radiusScale]
+            ],
             [
                 [this.dofBlurHLocations.u_maxCoCRadius, this.dof.maxCoCRadius]
             ]
@@ -191,7 +194,9 @@ export class DepthOfField {
                 [this.dofBlurVLocations.u_midFarBlurTexture, this.dofBlurHMidFarTexture],
                 [this.dofBlurVLocations.u_nearBlurTexture, this.dofBlurHNearTexture]
             ],
-            [],
+            [
+                [this.dofBlurVLocations.u_radiusScale, this.dof.radiusScale]
+            ],
             [
                 [this.dofBlurVLocations.u_maxCoCRadius, this.dof.maxCoCRadius]
             ]
@@ -341,6 +346,7 @@ export class DepthOfField {
             a_uv: gl.getAttribLocation(this.dofBlurHProgram, 'a_uv'),
             u_packedTexture: gl.getUniformLocation(this.dofBlurHProgram, 'u_packedTexture'),
             u_maxCoCRadius: gl.getUniformLocation(this.dofBlurHProgram, 'u_maxCoCRadius'),
+            u_radiusScale: gl.getUniformLocation(this.dofBlurHProgram, 'u_radiusScale'),
         };
         this.dofBlurVLocations = {
             a_position: gl.getAttribLocation(this.dofBlurVProgram, 'a_position'),
@@ -348,6 +354,7 @@ export class DepthOfField {
             u_midFarBlurTexture: gl.getUniformLocation(this.dofBlurVProgram, 'u_midFarBlurTexture'),
             u_nearBlurTexture: gl.getUniformLocation(this.dofBlurVProgram, 'u_nearBlurTexture'),
             u_maxCoCRadius: gl.getUniformLocation(this.dofBlurVProgram, 'u_maxCoCRadius'),
+            u_radiusScale: gl.getUniformLocation(this.dofBlurVProgram, 'u_radiusScale'),
         };
         this.dofCompositeLocations = {
             a_position: gl.getAttribLocation(this.dofCompositeProgram, 'a_position'),
@@ -370,7 +377,7 @@ export class DepthOfField {
         /////////////////////////////////// GEOMETRY / MESH SETUP
 
         // create object VAO
-        this.objectBuffers = twgl.primitives.createTorusBuffers(gl, .8, 0.25, 32, 32);
+        this.objectBuffers = twgl.primitives.createTorusBuffers(gl, .7, 0.25, 64, 16);
         this.objectVAO = this.#makeVertexArray(gl, [
             [this.objectBuffers.position, this.drawLocations.a_position, 3],
             [this.objectBuffers.normal, this.drawLocations.a_normal, 3],
@@ -392,7 +399,7 @@ export class DepthOfField {
         this.instanceMatricesArray = new Float32Array(this.numInstances * 16);
         this.instanceMatrices = [];
         const layerCount = this.gridSize * this.gridSize;
-        const spacing = 82;
+        const spacing = 80;
         const offset = Math.floor(this.gridSize / 2);
         const spacingOffset = spacing / 1.5;
         for(let i=0; i<this.numInstances; ++i) {
@@ -751,6 +758,7 @@ export class DepthOfField {
             this.#createTweakpaneSlider(cameraFolder, this.camera, 'far', 'far', 1, maxFar, null, () => this.#updateProjectionMatrix(this.gl));
             const dofSettings = this.pane.addFolder({ title: 'DoF Settings' });
             this.#createTweakpaneSlider(dofSettings, this.dof, 'maxCoCRadius', 'radius', 0, 30, 1);
+            this.#createTweakpaneSlider(dofSettings, this.dof, 'radiusScale', 'radius scale', 1, 5, 0.1);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'nearBlurry', 'near blur', 0, maxFar);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'nearSharp', 'near sharp', 0, maxFar);
             this.#createTweakpaneSlider(dofSettings, this.dof, 'farSharp', 'far sharp', 0, maxFar);

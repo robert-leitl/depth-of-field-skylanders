@@ -4,6 +4,7 @@ precision highp float;
 
 uniform sampler2D u_packedTexture;
 uniform int u_maxCoCRadius;
+uniform float u_radiusScale;
 
 in vec2 v_uv;
 
@@ -17,6 +18,7 @@ void main() {
         true,
         v_uv,
         u_maxCoCRadius,
+        u_radiusScale,
         u_packedTexture,
         u_packedTexture, // not used in horizontal pass
         outMidFarColor,

@@ -6,6 +6,7 @@ void depthOfFieldBlur(
     in bool isHorizontal,
     in vec2 A,
     in int maxCoCRadius,
+    in float radiusScale,
     in sampler2D midFarInTexture,
     in sampler2D nearInTexture,
     out vec4 midFarOut,
@@ -48,7 +49,7 @@ void depthOfFieldBlur(
     for(int delta = -maxCoCRadius; delta <= maxCoCRadius; ++delta) {
 
         // get the CoC radius at this tap
-        vec2 B = A + direction * (float(delta) * texelSize);
+        vec2 B = A + direction * (float(delta) * radiusScale * texelSize);
         vec4 packedB = texture(midFarInTexture, B);
         float rB = (packedB.a * 2. - 1.) * float(maxCoCRadius);
 
