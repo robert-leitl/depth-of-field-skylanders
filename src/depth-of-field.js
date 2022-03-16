@@ -553,7 +553,7 @@ export class DepthOfField {
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2000, 1000, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
 
         const img = new Image();
-        img.src = new URL('../assets/studio017.jpg', import.meta.url);
+        img.src = new URL('./assets/studio017.jpg', import.meta.url);
         img.addEventListener('load', () => {
             gl.bindTexture(gl.TEXTURE_2D, this.envMapTexture);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2000, 1000, 0, gl.RGBA, gl.UNSIGNED_BYTE, img);
