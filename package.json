@@ -1,11 +1,11 @@
 {
-  "name": "webgl-playground",
+  "name": "depth-of-field-skylanders",
   "version": "1.0.0",
   "description": "",
   "browserslist": "> 0.5%, last 2 versions, not dead",
   "scripts": {
     "prebuild": "rimraf dist",
-    "build": "parcel build src/index.html --public-url=/",
+    "build": "parcel build src/index.html --public-url=/demos/depth-of-field/",
     "serve": "live-server --port=1234 ./dist/",
     "watch": "parcel watch ./src/index.html --no-hmr",
     "start": "npm-run-all --parallel watch serve"
