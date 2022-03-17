@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "chroma-js": "^2.3.0",
+    "gl-matrix": "^3.4.3",
     "tweakpane": "^3.0.6",
     "twgl.js": "^4.21.2"
   }

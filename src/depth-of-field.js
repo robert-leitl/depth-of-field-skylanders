@@ -1,5 +1,6 @@
 
 import * as twgl from 'twgl.js';
+import * as glmat from 'gl-matrix';
 
 import drawVertShaderSource from './shader/draw.vert';
 import drawFragShaderSource from './shader/draw.frag';
@@ -37,11 +38,14 @@ export class DepthOfField {
     COMPOSITE_COC = 5;
 
     camera = {
-        rotation: [0, 0, 0],
-        position: [0, 0, 150],
         matrix: twgl.m4.identity(),
         near: 1,
-        far: 500
+        far: 500,
+        orbit: glmat.quat.create(),
+        up: glmat.vec3.fromValues(0, 1, 0),
+        distance: 150,
+        position: glmat.vec3.fromValues(0, 0, 150),
+        rotation: [0, 0, 0]
     };
 
     dof = {
@@ -565,12 +569,17 @@ export class DepthOfField {
         this.pointerDownPos = { x: 0, y: 0 };
         this.pointerPos = { x: 0, y: 0 };
         this.pointerFollowPos = { x: 0, y: 0 };
+        this.prevPointerPos = {x: 0, y: 0};
+        this.phi = 0.;
+        this.theta = 0.;
 
         this.canvas.addEventListener('pointerdown', e => {
             this.pointerDownPos = { x: e.clientX, y: e.clientY }
             this.pointerFollowPos = { x: e.clientX, y: e.clientY }
             this.pointerPos = { x: e.clientX, y: e.clientY }
-            this.pointerDownCameraPosition = [...this.camera.position];
+            this.prevPointerPos = { x: e.clientX, y: e.clientY }
+            this.pointerDownCameraUp = [...this.camera.up];
+            this.pointerDownRotation = [...this.camera.rotation];
             this.pointerDown = true;
         });
         this.canvas.addEventListener('pointerup', e => {
@@ -585,19 +594,39 @@ export class DepthOfField {
 
     #updateCameraOrbit() {
         if (this.pointerDown) {
-            const damping = 3;
-            const speed = 0.001;
+            const damping = 10;
             this.pointerFollowPos.x += (this.pointerPos.x - this.pointerFollowPos.x) / damping;
             this.pointerFollowPos.y += (this.pointerPos.y - this.pointerFollowPos.y) / damping;
 
-            const rY = -(this.pointerFollowPos.x - this.pointerDownPos.x) * speed;
-            const rX = -(this.pointerFollowPos.y - this.pointerDownPos.y) * speed;
+            const delta = {
+                x: this.pointerFollowPos.x - this.prevPointerPos.x,
+                y: this.pointerFollowPos.y - this.prevPointerPos.y
+            };
+            this.prevPointerPos = { ...this.pointerFollowPos };
 
-            const mX = twgl.m4.axisRotate(twgl.m4.identity(), [1, 0, 0], rX);
-            const m = twgl.m4.axisRotate(mX, [0, 1, 0], rY);
-            this.camera.position = twgl.m4.transformPoint(m, this.pointerDownCameraPosition);
-            this.#updateCameraMatrix();
+            const speed = 0.2;
+            this.phi = delta.x * speed;
+            this.theta = delta.y * speed;
+        } else {
+            this.phi *= 0.96;
+            this.theta *= 0.96;
         }
+
+        this.camera.rotation[0] -= this.theta;
+        this.camera.rotation[1] -= this.phi;
+
+        const thetaLimit = 90;
+        if (this.camera.rotation[0] > thetaLimit) {
+            this.camera.rotation[0] = thetaLimit;
+        } else if (this.camera.rotation[0] < -thetaLimit) {
+            this.camera.rotation[0] = -thetaLimit;
+        }
+
+        glmat.quat.fromEuler(this.camera.orbit, this.camera.rotation[0], this.camera.rotation[1], this.camera.rotation[2]);
+        glmat.vec3.transformQuat(this.camera.position, [0, 0, this.camera.distance], this.camera.orbit);
+        glmat.vec3.transformQuat(this.camera.up, [0, 1, 0], this.camera.orbit);
+
+        this.#updateCameraMatrix();
     }
 
     #createFramebuffer(gl, colorAttachements) {
@@ -737,7 +766,7 @@ export class DepthOfField {
     }
 
     #updateCameraMatrix() {
-        twgl.m4.lookAt(this.camera.position, [0, 0, 0], [0, 1, 0], this.camera.matrix);
+        twgl.m4.lookAt(this.camera.position, [0, 0, 0], this.camera.up, this.camera.matrix);
         twgl.m4.inverse(this.camera.matrix, this.drawUniforms.u_viewMatrix);
     }
 
