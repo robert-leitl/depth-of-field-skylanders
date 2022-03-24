@@ -4,6 +4,8 @@
 
 Rough implementation of the depth of field method described in GPU Pro<sup>4</sup> ([Source](https://casual-effects.blogspot.com/2013/09/the-skylanders-swap-force-depth-of.html))
 
+[DEMO](https://robert-leitl.github.io/depth-of-field-skylanders/dist/?debug)
+
 ### Features
 - Multi-sampling framebuffer
 - Multi-render targets MRT
