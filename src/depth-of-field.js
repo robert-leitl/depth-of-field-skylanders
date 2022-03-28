@@ -314,7 +314,7 @@ export class DepthOfField {
         ///////////////////////////////////  PROGRAM SETUP
 
         // setup programs
-        this.drawProgram = this.#createProgram(gl, [drawVertShaderSource, drawFragShaderSource]);
+        this.drawProgram = this.#createProgram(gl, [drawVertShaderSource, drawFragShaderSource], null, { a_position: 0, a_normal: 1, a_uv: 2, a_instanceMatrix: 4 });
         this.dofPackProgram = this.#createProgram(gl, [dofPackVertShaderSource, dofPackFragShaderSource], null, {a_position: 0, a_uv: 1});
         this.dofBlurHProgram = this.#createProgram(gl, [dofBlurHVertShaderSource, dofBlurHFragShaderSource], null, {a_position: 0, a_uv: 1});
         this.dofBlurVProgram = this.#createProgram(gl, [dofBlurVVertShaderSource, dofBlurVFragShaderSource], null, {a_position: 0, a_uv: 1});
@@ -572,6 +572,8 @@ export class DepthOfField {
         this.prevPointerPos = {x: 0, y: 0};
         this.phi = 0.;
         this.theta = 0.;
+
+        this.canvas.style.touchAction = 'none';
 
         this.canvas.addEventListener('pointerdown', e => {
             this.pointerDownPos = { x: e.clientX, y: e.clientY }
