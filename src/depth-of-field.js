@@ -134,7 +134,7 @@ export class DepthOfField {
         gl.uniform1i(this.drawLocations.u_envMap, 0);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, this.envMapTexture);
-        gl.clearBufferfv(gl.COLOR, 0, [1.0, 0.3, 0.5, 0.]);
+        gl.clearBufferfv(gl.COLOR, 1, [1.0, 0.3, 0.5, 0.]);
         gl.clearBufferfv(gl.DEPTH, 0, [1.]);
         gl.drawElementsInstanced(
             gl.TRIANGLES,
